@@ -7,12 +7,19 @@ import { TrelloClient } from "./trello-client.js";
 // Types
 // ============================================================
 
+export interface BoardCache {
+  name: string;
+  labels: Record<string, string>; // name (lowercase) → id
+  lists: Record<string, string>; // name (lowercase) → id
+}
+
 export interface TrelloMcpConfig {
   defaultBoardId: string;
   defaultBoardName: string;
   boards: Record<string, string>; // name → id (all user boards)
-  labels: Record<string, string>; // name (lowercase) → id
-  lists: Record<string, string>; // name (lowercase) → id
+  labels: Record<string, string>; // name (lowercase) → id  (default board)
+  lists: Record<string, string>; // name (lowercase) → id  (default board)
+  boardCache?: Record<string, BoardCache>; // boardId → cached data (non-default boards)
 }
 
 // ============================================================
@@ -187,6 +194,76 @@ export function resolveBoardId(
 }
 
 /**
+ * Returns the lists cache for a given board.
+ * For the default board, uses top-level `lists`.
+ * For other boards, uses `boardCache[boardId].lists`.
+ */
+function getListsCache(
+  config: TrelloMcpConfig,
+  boardId: string
+): Record<string, string> {
+  if (boardId === config.defaultBoardId) return config.lists;
+  return config.boardCache?.[boardId]?.lists ?? {};
+}
+
+/**
+ * Returns the labels cache for a given board.
+ * For the default board, uses top-level `labels`.
+ * For other boards, uses `boardCache[boardId].labels`.
+ */
+function getLabelsCache(
+  config: TrelloMcpConfig,
+  boardId: string
+): Record<string, string> {
+  if (boardId === config.defaultBoardId) return config.labels;
+  return config.boardCache?.[boardId]?.labels ?? {};
+}
+
+/**
+ * Ensures a non-default board has its lists and labels cached.
+ * Fetches from API on first access, then persists to config.
+ */
+export async function ensureBoardCached(
+  config: TrelloMcpConfig,
+  client: TrelloClient,
+  boardId: string
+): Promise<void> {
+  // Default board is always cached at the top level
+  if (boardId === config.defaultBoardId) return;
+
+  // Already cached
+  if (config.boardCache?.[boardId]) return;
+
+  const [labels, lists] = await Promise.all([
+    client.getBoardLabels(boardId),
+    client.getLists(boardId),
+  ]);
+
+  const labelMap: Record<string, string> = {};
+  for (const label of labels) {
+    if (label.name) {
+      labelMap[label.name.toLowerCase()] = label.id;
+    }
+  }
+
+  const listMap: Record<string, string> = {};
+  for (const list of lists) {
+    if (list.name) {
+      listMap[list.name.toLowerCase()] = list.id;
+    }
+  }
+
+  // Derive a name from the boards map, or fall back
+  const boardName =
+    Object.entries(config.boards).find(([, id]) => id === boardId)?.[0] ??
+    boardId;
+
+  if (!config.boardCache) config.boardCache = {};
+  config.boardCache[boardId] = { name: boardName, labels: labelMap, lists: listMap };
+  saveConfig(config);
+}
+
+/**
  * Resolves a list ID from `listId` or `listName`.
  * On cache miss for a name, re-fetches lists from API and updates config.
  */
@@ -208,8 +285,16 @@ export async function resolveListId(
 
   const key = listName.toLowerCase();
 
-  // Try cache first
-  if (config?.lists[key]) return config.lists[key];
+  // Ensure non-default board is cached before lookup
+  if (config) {
+    await ensureBoardCached(config, client, boardId);
+  }
+
+  // Try cache
+  if (config) {
+    const cached = getListsCache(config, boardId);
+    if (cached[key]) return cached[key];
+  }
 
   // Cache miss — re-fetch from API
   const lists = await client.getLists(boardId);
@@ -222,9 +307,17 @@ export async function resolveListId(
     );
   }
 
-  // Update cache
+  // Update the appropriate cache
   if (config) {
-    config.lists[key] = match.id;
+    if (boardId === config.defaultBoardId) {
+      config.lists[key] = match.id;
+    } else {
+      if (!config.boardCache) config.boardCache = {};
+      if (!config.boardCache[boardId]) {
+        config.boardCache[boardId] = { name: boardId, labels: {}, lists: {} };
+      }
+      config.boardCache[boardId].lists[key] = match.id;
+    }
     saveConfig(config);
   }
 
@@ -252,7 +345,16 @@ export async function resolveLabelId(
 
   const key = labelName.toLowerCase();
 
-  if (config?.labels[key]) return config.labels[key];
+  // Ensure non-default board is cached before lookup
+  if (config) {
+    await ensureBoardCached(config, client, boardId);
+  }
+
+  // Try cache
+  if (config) {
+    const cached = getLabelsCache(config, boardId);
+    if (cached[key]) return cached[key];
+  }
 
   // Cache miss — re-fetch
   const labels = await client.getBoardLabels(boardId);
@@ -268,8 +370,17 @@ export async function resolveLabelId(
     );
   }
 
+  // Update the appropriate cache
   if (config) {
-    config.labels[key] = match.id;
+    if (boardId === config.defaultBoardId) {
+      config.labels[key] = match.id;
+    } else {
+      if (!config.boardCache) config.boardCache = {};
+      if (!config.boardCache[boardId]) {
+        config.boardCache[boardId] = { name: boardId, labels: {}, lists: {} };
+      }
+      config.boardCache[boardId].labels[key] = match.id;
+    }
     saveConfig(config);
   }
 

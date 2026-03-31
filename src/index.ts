@@ -22,6 +22,7 @@ import {
   resolveLabelId,
   resolveLabelIds,
   TrelloMcpConfig,
+  ensureBoardCached,
 } from "./config.js";
 
 // ============================================================
@@ -620,6 +621,7 @@ async function main() {
               (() => {
                 throw new Error("No board ID available. Set a default board first.");
               })();
+            if (config) await ensureBoardCached(config, trelloClient, boardId);
             const labels = await trelloClient.getBoardLabels(boardId);
             return {
               content: [{ type: "text", text: JSON.stringify(labels) }],
@@ -781,6 +783,7 @@ async function main() {
               (() => {
                 throw new Error("No board ID available.");
               })();
+            if (config) await ensureBoardCached(config, trelloClient, boardId);
             const lists = await trelloClient.getLists(boardId);
             return {
               content: [{ type: "text", text: JSON.stringify(lists) }],
@@ -831,6 +834,7 @@ async function main() {
               (() => {
                 throw new Error("No board ID available.");
               })();
+            if (config) await ensureBoardCached(config, trelloClient, boardId);
             const limit = (args.limit as number) ?? 10;
             const activity = await trelloClient.getRecentActivity(
               boardId,
@@ -867,6 +871,7 @@ async function main() {
               (() => {
                 throw new Error("No board ID available.");
               })();
+            if (config) await ensureBoardCached(config, trelloClient, boardId);
             const limit = (args.limit as number) ?? 10;
             const cards = await trelloClient.searchCards(
               boardId,

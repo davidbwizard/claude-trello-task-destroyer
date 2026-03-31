@@ -13,5 +13,17 @@
     "inbox": "LIST_ID_1",
     "in progress": "LIST_ID_2",
     "complete": "LIST_ID_3"
+  },
+  "boardCache": {
+    "OTHER_BOARD_ID": {
+      "name": "Other Board",
+      "labels": {
+        "todo": "LABEL_ID_3"
+      },
+      "lists": {
+        "backlog": "LIST_ID_4",
+        "done": "LIST_ID_5"
+      }
+    }
   }
 }
