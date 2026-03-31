@@ -7,8 +7,22 @@ import {
   ListToolsRequestSchema,
   Tool,
 } from "@modelcontextprotocol/sdk/types.js";
+import { writeFileSync, mkdirSync, existsSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
 
 import { TrelloClient } from "./trello-client.js";
+import {
+  ensureConfig,
+  buildConfigForBoard,
+  loadConfig,
+  clearConfigCache,
+  resolveBoardId,
+  resolveListId,
+  resolveLabelId,
+  resolveLabelIds,
+  TrelloMcpConfig,
+} from "./config.js";
 
 // ============================================================
 // Tool definitions
@@ -26,21 +40,49 @@ const trelloGetMyBoardsTool: Tool = {
   },
 };
 
-// -- Labels --------------------------------------------------
+// -- Config --------------------------------------------------
 
-const trelloGetBoardLabelsTool: Tool = {
-  name: "trello_get_board_labels",
+const trelloSetDefaultBoardTool: Tool = {
+  name: "trello_set_default_board",
   description:
-    "Retrieves all labels defined on a board. Use this to discover available labels before filtering cards. Labels like 'Bug' and 'Feature Request' are primary filters; others (e.g. 'Onboarding', 'Kid') provide context about the affected area or audience.",
+    "Sets the default board for all subsequent tool calls. Fetches and caches the board's labels and lists for name-based lookups. Call this when prompted during first-use setup, or to switch boards.",
   inputSchema: {
     type: "object",
     properties: {
       boardId: {
         type: "string",
-        description: "The ID of the Trello board",
+        description: "The ID of the board to set as default",
       },
     },
     required: ["boardId"],
+  },
+};
+
+const trelloRefreshConfigTool: Tool = {
+  name: "trello_refresh_config",
+  description:
+    "Re-fetches and caches labels and lists for the default board. Use this after adding/renaming labels or lists on Trello so the server's cache stays current.",
+  inputSchema: {
+    type: "object",
+    properties: {},
+  },
+};
+
+// -- Labels --------------------------------------------------
+
+const trelloGetBoardLabelsTool: Tool = {
+  name: "trello_get_board_labels",
+  description:
+    "Retrieves all labels defined on a board. Uses default board if boardId is omitted. Labels like 'Bug' and 'Feature Request' are primary filters; others (e.g. 'Onboarding', 'Kid') provide context about the affected area or audience.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      boardId: {
+        type: "string",
+        description:
+          "The ID of the Trello board (optional — uses default board if omitted)",
+      },
+    },
   },
 };
 
@@ -49,7 +91,7 @@ const trelloGetBoardLabelsTool: Tool = {
 const trelloGetCardsByListTool: Tool = {
   name: "trello_get_cards_by_list",
   description:
-    "Retrieves all cards in a specific list. Cards include their labels for context.",
+    "Retrieves all cards in a specific list. Provide listId or listName (resolved from cache).",
   inputSchema: {
     type: "object",
     properties: {
@@ -57,41 +99,53 @@ const trelloGetCardsByListTool: Tool = {
         type: "string",
         description: "Trello list ID",
       },
+      listName: {
+        type: "string",
+        description:
+          "List name (alternative to listId — resolved via cached config)",
+      },
     },
-    required: ["listId"],
   },
 };
 
 const trelloGetCardsByLabelTool: Tool = {
   name: "trello_get_cards_by_label",
   description:
-    "Retrieves all open cards on a board that have a specific label. Great for filtering by category like 'Bug' or 'Feature Request'. Use trello_get_board_labels first to get label IDs.",
+    "Retrieves all open cards on a board that have a specific label. Provide labelId or labelName. Uses default board if boardId is omitted.",
   inputSchema: {
     type: "object",
     properties: {
       boardId: {
         type: "string",
-        description: "The ID of the Trello board",
+        description: "The ID of the Trello board (optional — uses default)",
       },
       labelId: {
         type: "string",
+        description: "The ID of the label to filter by",
+      },
+      labelName: {
+        type: "string",
         description:
-          "The ID of the label to filter by (get this from trello_get_board_labels)",
+          "Label name (alternative to labelId — resolved via cached config)",
       },
     },
-    required: ["boardId", "labelId"],
   },
 };
 
 const trelloAddCardTool: Tool = {
   name: "trello_add_card",
-  description: "Creates a new card in a specified list.",
+  description:
+    "Creates a new card in a specified list. Provide listId or listName. Labels can be IDs or names.",
   inputSchema: {
     type: "object",
     properties: {
       listId: {
         type: "string",
         description: "The ID of the list to add the card to",
+      },
+      listName: {
+        type: "string",
+        description: "List name (alternative to listId)",
       },
       name: { type: "string", description: "The title of the card" },
       description: {
@@ -107,15 +161,21 @@ const trelloAddCardTool: Tool = {
         description: "Array of label IDs to apply (optional)",
         items: { type: "string" },
       },
+      labelNames: {
+        type: "array",
+        description:
+          "Array of label names to apply (alternative to labels — resolved via cache)",
+        items: { type: "string" },
+      },
     },
-    required: ["listId", "name"],
+    required: ["name"],
   },
 };
 
 const trelloUpdateCardTool: Tool = {
   name: "trello_update_card",
   description:
-    "Updates a card's properties: name, description, due date, labels, or list.",
+    "Updates a card's properties: name, description, due date, labels, or list. Lists and labels can be specified by name.",
   inputSchema: {
     type: "object",
     properties: {
@@ -136,9 +196,19 @@ const trelloUpdateCardTool: Tool = {
         type: "string",
         description: "Move card to this list ID (optional)",
       },
+      listName: {
+        type: "string",
+        description: "Move card to this list by name (optional)",
+      },
       labels: {
         type: "array",
         description: "Replace labels with these label IDs (optional)",
+        items: { type: "string" },
+      },
+      labelNames: {
+        type: "array",
+        description:
+          "Replace labels with these label names (optional — resolved via cache)",
         items: { type: "string" },
       },
     },
@@ -149,7 +219,7 @@ const trelloUpdateCardTool: Tool = {
 const trelloMoveCardTool: Tool = {
   name: "trello_move_card",
   description:
-    "Moves a card to a different list. Use this when a task changes status (e.g. Inbox → In Progress → Complete).",
+    "Moves a card to a different list. Provide listId or listName. Use when a task changes status (e.g. Inbox → In Progress → Complete).",
   inputSchema: {
     type: "object",
     properties: {
@@ -161,8 +231,12 @@ const trelloMoveCardTool: Tool = {
         type: "string",
         description: "The ID of the destination list",
       },
+      listName: {
+        type: "string",
+        description: "Destination list name (alternative to listId)",
+      },
     },
-    required: ["cardId", "listId"],
+    required: ["cardId"],
   },
 };
 
@@ -206,41 +280,43 @@ const trelloAddCommentTool: Tool = {
 
 const trelloGetListsTool: Tool = {
   name: "trello_get_lists",
-  description: "Retrieves all lists on a board.",
+  description:
+    "Retrieves all lists on a board. Uses default board if boardId is omitted.",
   inputSchema: {
     type: "object",
     properties: {
       boardId: {
         type: "string",
-        description: "The ID of the Trello board",
+        description: "The ID of the Trello board (optional — uses default)",
       },
     },
-    required: ["boardId"],
   },
 };
 
 const trelloAddListTool: Tool = {
   name: "trello_add_list",
-  description: "Creates a new list on a board.",
+  description:
+    "Creates a new list on a board. Uses default board if boardId is omitted.",
   inputSchema: {
     type: "object",
     properties: {
       boardId: {
         type: "string",
-        description: "The ID of the board",
+        description: "The ID of the board (optional — uses default)",
       },
       name: {
         type: "string",
         description: "Name of the new list",
       },
     },
-    required: ["boardId", "name"],
+    required: ["name"],
   },
 };
 
 const trelloArchiveListTool: Tool = {
   name: "trello_archive_list",
-  description: "Archives (closes) a list.",
+  description:
+    "Archives (closes) a list. Provide listId or listName.",
   inputSchema: {
     type: "object",
     properties: {
@@ -248,8 +324,11 @@ const trelloArchiveListTool: Tool = {
         type: "string",
         description: "The ID of the list to archive",
       },
+      listName: {
+        type: "string",
+        description: "List name (alternative to listId)",
+      },
     },
-    required: ["listId"],
   },
 };
 
@@ -257,20 +336,20 @@ const trelloArchiveListTool: Tool = {
 
 const trelloGetRecentActivityTool: Tool = {
   name: "trello_get_recent_activity",
-  description: "Retrieves recent activity on a board.",
+  description:
+    "Retrieves recent activity on a board. Uses default board if boardId is omitted.",
   inputSchema: {
     type: "object",
     properties: {
       boardId: {
         type: "string",
-        description: "The ID of the Trello board",
+        description: "The ID of the Trello board (optional — uses default)",
       },
       limit: {
         type: "number",
         description: "Number of activities to retrieve (default: 10)",
       },
     },
-    required: ["boardId"],
   },
 };
 
@@ -301,6 +380,27 @@ const trelloSearchAllBoardsTool: Tool = {
   },
 };
 
+const trelloSearchCardsTool: Tool = {
+  name: "trello_search_cards",
+  description:
+    "Searches for cards within a specific board by name, description, or label. Uses default board if boardId is omitted.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      query: { type: "string", description: "Search text" },
+      boardId: {
+        type: "string",
+        description: "Board ID (optional — uses default board)",
+      },
+      limit: {
+        type: "number",
+        description: "Max results (default: 10)",
+      },
+    },
+    required: ["query"],
+  },
+};
+
 // -- Attachments ---------------------------------------------
 
 const trelloGetCardAttachmentsTool: Tool = {
@@ -322,7 +422,7 @@ const trelloGetCardAttachmentsTool: Tool = {
 const trelloDownloadAttachmentTool: Tool = {
   name: "trello_download_attachment",
   description:
-    "Downloads a specific attachment from a card. Returns base64 content for Trello uploads, or URL for external links.",
+    "Downloads a specific attachment from a card. Images are returned as inline image content. Non-image files are saved to a temp directory and the file path is returned.",
   inputSchema: {
     type: "object",
     properties: {
@@ -345,6 +445,8 @@ const trelloDownloadAttachmentTool: Tool = {
 
 const ALL_TOOLS: Tool[] = [
   trelloGetMyBoardsTool,
+  trelloSetDefaultBoardTool,
+  trelloRefreshConfigTool,
   trelloGetBoardLabelsTool,
   trelloGetCardsByListTool,
   trelloGetCardsByLabelTool,
@@ -359,9 +461,32 @@ const ALL_TOOLS: Tool[] = [
   trelloGetRecentActivityTool,
   trelloGetMyCardsTool,
   trelloSearchAllBoardsTool,
+  trelloSearchCardsTool,
   trelloGetCardAttachmentsTool,
   trelloDownloadAttachmentTool,
 ];
+
+// ============================================================
+// Tools that do NOT need a config to function
+// ============================================================
+
+const CONFIG_EXEMPT_TOOLS = new Set([
+  "trello_get_my_boards",
+  "trello_set_default_board",
+  "trello_get_my_cards",
+]);
+
+// ============================================================
+// Temp directory for attachment downloads
+// ============================================================
+
+const ATTACHMENT_DIR = join(tmpdir(), "trello-attachments");
+
+function ensureAttachmentDir(): void {
+  if (!existsSync(ATTACHMENT_DIR)) {
+    mkdirSync(ATTACHMENT_DIR, { recursive: true });
+  }
+}
 
 // ============================================================
 // Server
@@ -382,7 +507,7 @@ async function main() {
   console.error("Starting Trello MCP Server (Enhanced)...");
 
   const server = new Server(
-    { name: "trello-mcp-enhanced", version: "1.0.0" },
+    { name: "trello-mcp-enhanced", version: "2.0.0" },
     { capabilities: { tools: {} } }
   );
 
@@ -398,9 +523,27 @@ async function main() {
     CallToolRequestSchema,
     async (request: CallToolRequest) => {
       try {
-        const args = (request.params.arguments ?? {}) as Record<string, unknown>;
+        const args = (request.params.arguments ?? {}) as Record<
+          string,
+          unknown
+        >;
+        const toolName = request.params.name;
 
-        switch (request.params.name) {
+        // -- First-use config check (intercept) ----------------
+        if (!CONFIG_EXEMPT_TOOLS.has(toolName)) {
+          const setupResult = await ensureConfig(trelloClient);
+          if (!setupResult.ready) {
+            return {
+              content: [
+                { type: "text", text: setupResult.promptMessage ?? "" },
+              ],
+            };
+          }
+        }
+
+        const config = loadConfig();
+
+        switch (toolName) {
           // -- Boards ----------------------------------------
           case "trello_get_my_boards": {
             const boards = await trelloClient.getMyBoards();
@@ -409,10 +552,74 @@ async function main() {
             };
           }
 
+          // -- Config ----------------------------------------
+          case "trello_set_default_board": {
+            const boardId = args.boardId as string;
+            if (!boardId)
+              throw new Error("Missing required argument: boardId");
+
+            // Fetch boards (used for name lookup + caching all boards)
+            const boards = await trelloClient.getMyBoards();
+            const board = boards.find((b) => b.id === boardId);
+            const boardName = board?.name ?? "Unknown Board";
+
+            const boardMap: Record<string, string> = {};
+            for (const b of boards) {
+              boardMap[b.name] = b.id;
+            }
+
+            const newConfig = await buildConfigForBoard(
+              trelloClient,
+              boardId,
+              boardName,
+              boardMap
+            );
+
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({
+                    message: `Default board set to "${boardName}". Cached ${Object.keys(newConfig.labels).length} labels and ${Object.keys(newConfig.lists).length} lists.`,
+                    config: newConfig,
+                  }),
+                },
+              ],
+            };
+          }
+
+          case "trello_refresh_config": {
+            if (!config) {
+              throw new Error(
+                "No config exists yet. Call any tool to trigger setup, or use trello_set_default_board."
+              );
+            }
+            clearConfigCache();
+            const refreshed = await buildConfigForBoard(
+              trelloClient,
+              config.defaultBoardId,
+              config.defaultBoardName
+            );
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({
+                    message: `Config refreshed for "${refreshed.defaultBoardName}". Cached ${Object.keys(refreshed.labels).length} labels and ${Object.keys(refreshed.lists).length} lists.`,
+                    config: refreshed,
+                  }),
+                },
+              ],
+            };
+          }
+
           // -- Labels ----------------------------------------
           case "trello_get_board_labels": {
-            const boardId = args.boardId as string;
-            if (!boardId) throw new Error("Missing required argument: boardId");
+            const boardId =
+              resolveBoardId(args, config) ??
+              (() => {
+                throw new Error("No board ID available. Set a default board first.");
+              })();
             const labels = await trelloClient.getBoardLabels(boardId);
             return {
               content: [{ type: "text", text: JSON.stringify(labels) }],
@@ -421,8 +628,15 @@ async function main() {
 
           // -- Cards -----------------------------------------
           case "trello_get_cards_by_list": {
-            const listId = args.listId as string;
-            if (!listId) throw new Error("Missing required argument: listId");
+            const boardId = resolveBoardId(args, config);
+            if (!boardId)
+              throw new Error("No board ID available for list name resolution.");
+            const listId = await resolveListId(
+              args,
+              config,
+              trelloClient,
+              boardId
+            );
             const cards = await trelloClient.getCardsByList(listId);
             return {
               content: [{ type: "text", text: JSON.stringify(cards) }],
@@ -430,12 +644,15 @@ async function main() {
           }
 
           case "trello_get_cards_by_label": {
-            const boardId = args.boardId as string;
-            const labelId = args.labelId as string;
-            if (!boardId || !labelId)
-              throw new Error(
-                "Missing required arguments: boardId, labelId"
-              );
+            const boardId = resolveBoardId(args, config);
+            if (!boardId)
+              throw new Error("No board ID available.");
+            const labelId = await resolveLabelId(
+              args,
+              config,
+              trelloClient,
+              boardId
+            );
             const cards = await trelloClient.getCardsByLabel(boardId, labelId);
             return {
               content: [{ type: "text", text: JSON.stringify(cards) }],
@@ -443,16 +660,32 @@ async function main() {
           }
 
           case "trello_add_card": {
-            const listId = args.listId as string;
             const name = args.name as string;
-            if (!listId || !name)
-              throw new Error("Missing required arguments: listId, name");
+            if (!name) throw new Error("Missing required argument: name");
+
+            const boardId = resolveBoardId(args, config);
+            if (!boardId)
+              throw new Error("No board ID available for name resolution.");
+
+            const listId = await resolveListId(
+              args,
+              config,
+              trelloClient,
+              boardId
+            );
+            const resolvedLabels = await resolveLabelIds(
+              args,
+              config,
+              trelloClient,
+              boardId
+            );
+
             const card = await trelloClient.addCard({
               listId,
               name,
               description: args.description as string | undefined,
               dueDate: args.dueDate as string | undefined,
-              labels: args.labels as string[] | undefined,
+              labels: resolvedLabels,
             });
             return {
               content: [{ type: "text", text: JSON.stringify(card) }],
@@ -462,13 +695,38 @@ async function main() {
           case "trello_update_card": {
             const cardId = args.cardId as string;
             if (!cardId) throw new Error("Missing required argument: cardId");
+
+            const boardId = resolveBoardId(args, config);
+
+            // Resolve listName → listId if provided
+            let listId = args.listId as string | undefined;
+            if (!listId && args.listName && boardId) {
+              listId = await resolveListId(
+                args,
+                config,
+                trelloClient,
+                boardId
+              );
+            }
+
+            // Resolve labelNames → label IDs if provided
+            let resolvedLabels = args.labels as string[] | undefined;
+            if (!resolvedLabels && args.labelNames && boardId) {
+              resolvedLabels = await resolveLabelIds(
+                args,
+                config,
+                trelloClient,
+                boardId
+              );
+            }
+
             const card = await trelloClient.updateCard({
               cardId,
               name: args.name as string | undefined,
               description: args.description as string | undefined,
               dueDate: args.dueDate as string | undefined,
-              listId: args.listId as string | undefined,
-              labels: args.labels as string[] | undefined,
+              listId,
+              labels: resolvedLabels,
             });
             return {
               content: [{ type: "text", text: JSON.stringify(card) }],
@@ -477,9 +735,18 @@ async function main() {
 
           case "trello_move_card": {
             const cardId = args.cardId as string;
-            const listId = args.listId as string;
-            if (!cardId || !listId)
-              throw new Error("Missing required arguments: cardId, listId");
+            if (!cardId) throw new Error("Missing required argument: cardId");
+
+            const boardId = resolveBoardId(args, config);
+            if (!boardId)
+              throw new Error("No board ID available for list resolution.");
+
+            const listId = await resolveListId(
+              args,
+              config,
+              trelloClient,
+              boardId
+            );
             const card = await trelloClient.moveCard(cardId, listId);
             return {
               content: [{ type: "text", text: JSON.stringify(card) }],
@@ -509,8 +776,11 @@ async function main() {
 
           // -- Lists -----------------------------------------
           case "trello_get_lists": {
-            const boardId = args.boardId as string;
-            if (!boardId) throw new Error("Missing required argument: boardId");
+            const boardId =
+              resolveBoardId(args, config) ??
+              (() => {
+                throw new Error("No board ID available.");
+              })();
             const lists = await trelloClient.getLists(boardId);
             return {
               content: [{ type: "text", text: JSON.stringify(lists) }],
@@ -518,10 +788,13 @@ async function main() {
           }
 
           case "trello_add_list": {
-            const boardId = args.boardId as string;
+            const boardId =
+              resolveBoardId(args, config) ??
+              (() => {
+                throw new Error("No board ID available.");
+              })();
             const name = args.name as string;
-            if (!boardId || !name)
-              throw new Error("Missing required arguments: boardId, name");
+            if (!name) throw new Error("Missing required argument: name");
             const list = await trelloClient.addList(boardId, name);
             return {
               content: [{ type: "text", text: JSON.stringify(list) }],
@@ -529,8 +802,22 @@ async function main() {
           }
 
           case "trello_archive_list": {
-            const listId = args.listId as string;
-            if (!listId) throw new Error("Missing required argument: listId");
+            const boardId = resolveBoardId(args, config);
+            let listId = args.listId as string | undefined;
+
+            if (!listId && args.listName) {
+              if (!boardId)
+                throw new Error("No board ID available for list name resolution.");
+              listId = await resolveListId(
+                args,
+                config,
+                trelloClient,
+                boardId
+              );
+            }
+
+            if (!listId)
+              throw new Error("Either listId or listName is required.");
             const list = await trelloClient.archiveList(listId);
             return {
               content: [{ type: "text", text: JSON.stringify(list) }],
@@ -539,8 +826,11 @@ async function main() {
 
           // -- Activity --------------------------------------
           case "trello_get_recent_activity": {
-            const boardId = args.boardId as string;
-            if (!boardId) throw new Error("Missing required argument: boardId");
+            const boardId =
+              resolveBoardId(args, config) ??
+              (() => {
+                throw new Error("No board ID available.");
+              })();
             const limit = (args.limit as number) ?? 10;
             const activity = await trelloClient.getRecentActivity(
               boardId,
@@ -569,6 +859,25 @@ async function main() {
             };
           }
 
+          case "trello_search_cards": {
+            const query = args.query as string;
+            if (!query) throw new Error("Missing required argument: query");
+            const boardId =
+              resolveBoardId(args, config) ??
+              (() => {
+                throw new Error("No board ID available.");
+              })();
+            const limit = (args.limit as number) ?? 10;
+            const cards = await trelloClient.searchCards(
+              boardId,
+              query,
+              limit
+            );
+            return {
+              content: [{ type: "text", text: JSON.stringify(cards) }],
+            };
+          }
+
           // -- Attachments -----------------------------------
           case "trello_get_card_attachments": {
             const cardId = args.cardId as string;
@@ -591,8 +900,67 @@ async function main() {
               cardId,
               attachmentId
             );
+
+            // External link — just return URL
+            if (!result.content) {
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: JSON.stringify({
+                      name: result.attachment.name,
+                      url: result.url,
+                      error: result.error,
+                    }),
+                  },
+                ],
+              };
+            }
+
+            const mimeType = result.attachment.mimeType ?? "";
+
+            // Images — return as inline image content block
+            if (mimeType.startsWith("image/")) {
+              return {
+                content: [
+                  {
+                    type: "image" as const,
+                    data: result.content,
+                    mimeType,
+                  },
+                  {
+                    type: "text",
+                    text: JSON.stringify({
+                      name: result.attachment.name,
+                      mimeType,
+                      bytes: result.attachment.bytes,
+                    }),
+                  },
+                ],
+              };
+            }
+
+            // Non-images — write to temp file, return path
+            ensureAttachmentDir();
+            const safeFileName = result.attachment.fileName.replace(
+              /[^a-zA-Z0-9._-]/g,
+              "_"
+            );
+            const filePath = join(ATTACHMENT_DIR, safeFileName);
+            writeFileSync(filePath, Buffer.from(result.content, "base64"));
+
             return {
-              content: [{ type: "text", text: JSON.stringify(result) }],
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({
+                    name: result.attachment.name,
+                    mimeType,
+                    bytes: result.attachment.bytes,
+                    filePath,
+                  }),
+                },
+              ],
             };
           }
 

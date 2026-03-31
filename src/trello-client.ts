@@ -265,6 +265,26 @@ export class TrelloClient {
     });
   }
 
+  async searchCards(
+    boardId: string,
+    query: string,
+    limit: number = 10
+  ): Promise<TrelloCard[]> {
+    return this.handleRequest(async () => {
+      const response = await this.axiosInstance.get("/search", {
+        params: {
+          query,
+          idBoards: boardId,
+          modelTypes: "cards",
+          cards_limit: limit,
+          card_fields:
+            "id,name,desc,due,idList,idBoard,idLabels,closed,url,dateLastActivity,labels",
+        },
+      });
+      return response.data.cards ?? [];
+    });
+  }
+
   // ----------------------------------------------------------------
   // Attachments
   // ----------------------------------------------------------------

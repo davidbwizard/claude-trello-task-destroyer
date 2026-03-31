@@ -1,0 +1,17 @@
+{
+  "defaultBoardId": "YOUR_BOARD_ID",
+  "defaultBoardName": "My Board",
+  "boards": {
+    "My Board": "YOUR_BOARD_ID",
+    "Other Board": "OTHER_BOARD_ID"
+  },
+  "labels": {
+    "bug": "LABEL_ID_1",
+    "feature request": "LABEL_ID_2"
+  },
+  "lists": {
+    "inbox": "LIST_ID_1",
+    "in progress": "LIST_ID_2",
+    "complete": "LIST_ID_3"
+  }
+}
