@@ -1,0 +1,92 @@
+# Trello MCP Enhanced
+
+An enhanced [Model Context Protocol](https://modelcontextprotocol.io/) server for Trello, designed for use with [Claude Code](https://claude.ai/claude-code).
+
+Browse boards, filter cards by label, move tasks between lists, and add comments — all through natural conversation with Claude.
+
+## What's included
+
+| Tool | Description |
+|------|-------------|
+| `trello_get_my_boards` | List all your Trello boards |
+| `trello_get_board_labels` | Get all labels on a board |
+| `trello_get_cards_by_label` | Filter cards by label (e.g. "show me all bugs") |
+| `trello_get_cards_by_list` | Get all cards in a list |
+| `trello_move_card` | Move a card between lists |
+| `trello_add_comment` | Add a comment to a card |
+| `trello_add_card` | Create a new card |
+| `trello_update_card` | Update card properties |
+| `trello_archive_card` | Archive a card |
+| `trello_get_lists` | List all lists on a board |
+| `trello_add_list` | Create a new list |
+| `trello_archive_list` | Archive a list |
+| `trello_get_recent_activity` | Get recent board activity |
+| `trello_get_my_cards` | Get all cards assigned to you |
+| `trello_search_all_boards` | Search across all boards |
+| `trello_get_card_attachments` | List attachments on a card |
+| `trello_download_attachment` | Download an attachment |
+
+## Prerequisites
+
+- **Node.js** 16 or higher
+- **Claude Code** CLI installed
+- **Trello account** with API access
+
+## Setup
+
+### 1. Get your Trello API credentials
+
+1. Go to [trello.com/power-ups/admin](https://trello.com/power-ups/admin)
+2. Create a new Power-Up (or select an existing one)
+3. Copy your **API Key**
+4. Click the link to generate a **Token** — authorize it when prompted
+
+### 2. Clone and run setup
+
+```bash
+git clone <your-repo-url> trello-mcp-enhanced
+cd trello-mcp-enhanced
+bash setup.sh
+```
+
+The setup script will:
+- Ask for your API key and token
+- Install dependencies and build the project
+- Register the MCP server with Claude Code
+
+### Manual setup (if you prefer)
+
+```bash
+git clone <your-repo-url> trello-mcp-enhanced
+cd trello-mcp-enhanced
+npm install
+npm run build
+
+claude mcp add --scope user trello \
+  -e TRELLO_API_KEY=your_api_key \
+  -e TRELLO_TOKEN=your_token \
+  -- node "$(pwd)/build/index.js"
+```
+
+## Usage
+
+Once set up, just talk to Claude naturally:
+
+- "List my Trello boards"
+- "Show me the Inbox on Chocabloc"
+- "What bugs do we have?"
+- "Move that card to In Progress"
+- "Add a comment saying I'm working on this"
+- "Create a new card for adding dark mode"
+
+## CLAUDE.md
+
+This repo includes a `CLAUDE.md` file that teaches Claude how to use the Trello tools effectively — label taxonomy, workflow patterns, and formatting guidelines. Copy it to your project or reference it for best results.
+
+## Credits
+
+Built on top of [claude-mcp-trello](https://github.com/hrs-asano/claude-mcp-trello) by hrs-asano. Enhanced with board listing, label filtering, card movement, and comments.
+
+## License
+
+MIT
