@@ -7,7 +7,9 @@ Browse boards, filter cards by label, move tasks between lists, and add comments
 ## Key Features
 
 - **Auto-config** — on first use, the server discovers your boards and caches labels/lists. No manual board ID wrangling.
-- **Name-based lookups** — use `listName: "Inbox"` or `labelName: "Bug"` instead of raw IDs.
+- **Name-based lookups** — use `listName: "Inbox"`, `labelName: "Bug"`, or `boardName: "My Board"` instead of raw IDs.
+- **Multi-board caching** — boards, labels, and lists are lazily cached per board as you use them. The config builds up over time.
+- **Auto-refresh** — cached data auto-refreshes every 24 hours to stay current.
 - **Board-scoped search** — find cards by name, description, or label within your default board.
 - **Smart attachments** — images return inline; non-image files save to a temp directory.
 
@@ -18,6 +20,7 @@ Browse boards, filter cards by label, move tasks between lists, and add comments
 | `trello_get_my_boards` | List all your Trello boards |
 | `trello_set_default_board` | Set the default board and cache its labels/lists |
 | `trello_refresh_config` | Re-fetch cached labels and lists for the default board |
+| `trello_get_config` | View the current cached config (boards, labels, lists) |
 | `trello_get_board_labels` | Get all labels on a board (default board if omitted) |
 | `trello_get_cards_by_label` | Filter cards by label name or ID |
 | `trello_get_cards_by_list` | Get all cards in a list by name or ID |
@@ -82,8 +85,13 @@ claude mcp add --scope user trello \
 
 On first tool call, the server auto-generates `trello-config.json` with your default board, cached labels, and cached lists. This file is gitignored — see `trello-config.example.json` for the format.
 
+The config caches data at two levels:
+- **Default board**: labels and lists cached at the top level
+- **Other boards**: labels and lists lazily cached in `boardCache` when first accessed
+
+The cache auto-refreshes every 24 hours. To **manually refresh**: call `trello_refresh_config`.
 To **switch boards**: call `trello_set_default_board` with the new board ID.
-To **refresh cache**: call `trello_refresh_config` after adding/renaming labels or lists on Trello.
+To **view cached data**: call `trello_get_config`.
 
 ## Usage
 
@@ -92,6 +100,7 @@ Once set up, just talk to Claude naturally:
 - "List my Trello boards"
 - "Show me the Inbox"
 - "What bugs do we have?"
+- "Show me the lists on Shell Shockers Working Board"
 - "Move that card to In Progress"
 - "Add a comment saying I'm working on this"
 - "Create a new card for adding dark mode in the Inbox with the Feature Request label"
@@ -103,7 +112,7 @@ This repo includes a `CLAUDE.md` file that teaches Claude how to use the Trello 
 
 ## Credits
 
-Built on top of [claude-mcp-trello](https://github.com/hrs-asano/claude-mcp-trello) by hrs-asano. Enhanced with auto-config, name-based lookups, board-scoped search, and smart attachments.
+Built on top of [claude-mcp-trello](https://github.com/hrs-asano/claude-mcp-trello) by hrs-asano. Enhanced with auto-config, name-based lookups, multi-board caching, auto-refresh, board-scoped search, and smart attachments.
 
 ## License
 

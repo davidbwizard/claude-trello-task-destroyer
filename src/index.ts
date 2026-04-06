@@ -16,6 +16,7 @@ import {
   ensureConfig,
   buildConfigForBoard,
   loadConfig,
+  saveConfig,
   clearConfigCache,
   resolveBoardId,
   resolveListId,
@@ -69,6 +70,16 @@ const trelloRefreshConfigTool: Tool = {
   },
 };
 
+const trelloGetConfigTool: Tool = {
+  name: "trello_get_config",
+  description:
+    "Returns the current server config: default board, cached boards, labels, lists, and board cache. Use this to understand what boards and data are available without making API calls.",
+  inputSchema: {
+    type: "object",
+    properties: {},
+  },
+};
+
 // -- Labels --------------------------------------------------
 
 const trelloGetBoardLabelsTool: Tool = {
@@ -81,7 +92,12 @@ const trelloGetBoardLabelsTool: Tool = {
       boardId: {
         type: "string",
         description:
-          "The ID of the Trello board (optional — uses default board if omitted)",
+          "Board ID (optional — uses default board if omitted)",
+      },
+      boardName: {
+        type: "string",
+        description:
+          "Board name (alternative to boardId — resolved via cached boards)",
       },
     },
   },
@@ -92,10 +108,18 @@ const trelloGetBoardLabelsTool: Tool = {
 const trelloGetCardsByListTool: Tool = {
   name: "trello_get_cards_by_list",
   description:
-    "Retrieves all cards in a specific list. Provide listId or listName (resolved from cache).",
+    "Retrieves all cards in a specific list. Provide listId or listName (resolved from cache). Uses default board if boardId/boardName is omitted.",
   inputSchema: {
     type: "object",
     properties: {
+      boardId: {
+        type: "string",
+        description: "Board ID (optional — uses default)",
+      },
+      boardName: {
+        type: "string",
+        description: "Board name (alternative to boardId)",
+      },
       listId: {
         type: "string",
         description: "Trello list ID",
@@ -112,13 +136,17 @@ const trelloGetCardsByListTool: Tool = {
 const trelloGetCardsByLabelTool: Tool = {
   name: "trello_get_cards_by_label",
   description:
-    "Retrieves all open cards on a board that have a specific label. Provide labelId or labelName. Uses default board if boardId is omitted.",
+    "Retrieves all open cards on a board that have a specific label. Provide labelId or labelName. Uses default board if boardId/boardName is omitted.",
   inputSchema: {
     type: "object",
     properties: {
       boardId: {
         type: "string",
-        description: "The ID of the Trello board (optional — uses default)",
+        description: "Board ID (optional — uses default)",
+      },
+      boardName: {
+        type: "string",
+        description: "Board name (alternative to boardId)",
       },
       labelId: {
         type: "string",
@@ -136,10 +164,18 @@ const trelloGetCardsByLabelTool: Tool = {
 const trelloAddCardTool: Tool = {
   name: "trello_add_card",
   description:
-    "Creates a new card in a specified list. Provide listId or listName. Labels can be IDs or names.",
+    "Creates a new card in a specified list. Provide listId or listName. Labels can be IDs or names. Uses default board if boardId/boardName is omitted.",
   inputSchema: {
     type: "object",
     properties: {
+      boardId: {
+        type: "string",
+        description: "Board ID (optional — uses default)",
+      },
+      boardName: {
+        type: "string",
+        description: "Board name (alternative to boardId)",
+      },
       listId: {
         type: "string",
         description: "The ID of the list to add the card to",
@@ -176,10 +212,18 @@ const trelloAddCardTool: Tool = {
 const trelloUpdateCardTool: Tool = {
   name: "trello_update_card",
   description:
-    "Updates a card's properties: name, description, due date, labels, or list. Lists and labels can be specified by name.",
+    "Updates a card's properties: name, description, due date, labels, or list. Lists and labels can be specified by name. Uses default board if boardId/boardName is omitted.",
   inputSchema: {
     type: "object",
     properties: {
+      boardId: {
+        type: "string",
+        description: "Board ID (optional — uses default)",
+      },
+      boardName: {
+        type: "string",
+        description: "Board name (alternative to boardId)",
+      },
       cardId: {
         type: "string",
         description: "The ID of the card to update",
@@ -220,10 +264,18 @@ const trelloUpdateCardTool: Tool = {
 const trelloMoveCardTool: Tool = {
   name: "trello_move_card",
   description:
-    "Moves a card to a different list. Provide listId or listName. Use when a task changes status (e.g. Inbox → In Progress → Complete).",
+    "Moves a card to a different list. Provide listId or listName. Uses default board if boardId/boardName is omitted.",
   inputSchema: {
     type: "object",
     properties: {
+      boardId: {
+        type: "string",
+        description: "Board ID (optional — uses default)",
+      },
+      boardName: {
+        type: "string",
+        description: "Board name (alternative to boardId)",
+      },
       cardId: {
         type: "string",
         description: "The ID of the card to move",
@@ -282,13 +334,17 @@ const trelloAddCommentTool: Tool = {
 const trelloGetListsTool: Tool = {
   name: "trello_get_lists",
   description:
-    "Retrieves all lists on a board. Uses default board if boardId is omitted.",
+    "Retrieves all lists on a board. Uses default board if boardId/boardName is omitted.",
   inputSchema: {
     type: "object",
     properties: {
       boardId: {
         type: "string",
-        description: "The ID of the Trello board (optional — uses default)",
+        description: "Board ID (optional — uses default)",
+      },
+      boardName: {
+        type: "string",
+        description: "Board name (alternative to boardId)",
       },
     },
   },
@@ -297,13 +353,17 @@ const trelloGetListsTool: Tool = {
 const trelloAddListTool: Tool = {
   name: "trello_add_list",
   description:
-    "Creates a new list on a board. Uses default board if boardId is omitted.",
+    "Creates a new list on a board. Uses default board if boardId/boardName is omitted.",
   inputSchema: {
     type: "object",
     properties: {
       boardId: {
         type: "string",
-        description: "The ID of the board (optional — uses default)",
+        description: "Board ID (optional — uses default)",
+      },
+      boardName: {
+        type: "string",
+        description: "Board name (alternative to boardId)",
       },
       name: {
         type: "string",
@@ -338,13 +398,17 @@ const trelloArchiveListTool: Tool = {
 const trelloGetRecentActivityTool: Tool = {
   name: "trello_get_recent_activity",
   description:
-    "Retrieves recent activity on a board. Uses default board if boardId is omitted.",
+    "Retrieves recent activity on a board. Uses default board if boardId/boardName is omitted.",
   inputSchema: {
     type: "object",
     properties: {
       boardId: {
         type: "string",
-        description: "The ID of the Trello board (optional — uses default)",
+        description: "Board ID (optional — uses default)",
+      },
+      boardName: {
+        type: "string",
+        description: "Board name (alternative to boardId)",
       },
       limit: {
         type: "number",
@@ -384,7 +448,7 @@ const trelloSearchAllBoardsTool: Tool = {
 const trelloSearchCardsTool: Tool = {
   name: "trello_search_cards",
   description:
-    "Searches for cards within a specific board by name, description, or label. Uses default board if boardId is omitted.",
+    "Searches for cards within a specific board by name, description, or label. Uses default board if boardId/boardName is omitted.",
   inputSchema: {
     type: "object",
     properties: {
@@ -393,12 +457,34 @@ const trelloSearchCardsTool: Tool = {
         type: "string",
         description: "Board ID (optional — uses default board)",
       },
+      boardName: {
+        type: "string",
+        description: "Board name (alternative to boardId)",
+      },
       limit: {
         type: "number",
         description: "Max results (default: 10)",
       },
     },
     required: ["query"],
+  },
+};
+
+// -- Card creator --------------------------------------------
+
+const trelloGetCardCreatorTool: Tool = {
+  name: "trello_get_card_creator",
+  description:
+    "Returns the full name and username of the Trello member who created a card. Useful for attributing changes in PRs or comments.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      cardId: {
+        type: "string",
+        description: "The ID of the Trello card",
+      },
+    },
+    required: ["cardId"],
   },
 };
 
@@ -448,6 +534,7 @@ const ALL_TOOLS: Tool[] = [
   trelloGetMyBoardsTool,
   trelloSetDefaultBoardTool,
   trelloRefreshConfigTool,
+  trelloGetConfigTool,
   trelloGetBoardLabelsTool,
   trelloGetCardsByListTool,
   trelloGetCardsByLabelTool,
@@ -463,6 +550,7 @@ const ALL_TOOLS: Tool[] = [
   trelloGetMyCardsTool,
   trelloSearchAllBoardsTool,
   trelloSearchCardsTool,
+  trelloGetCardCreatorTool,
   trelloGetCardAttachmentsTool,
   trelloDownloadAttachmentTool,
 ];
@@ -474,6 +562,7 @@ const ALL_TOOLS: Tool[] = [
 const CONFIG_EXEMPT_TOOLS = new Set([
   "trello_get_my_boards",
   "trello_set_default_board",
+  "trello_get_config",
   "trello_get_my_cards",
 ]);
 
@@ -595,20 +684,43 @@ async function main() {
                 "No config exists yet. Call any tool to trigger setup, or use trello_set_default_board."
               );
             }
+            // Preserve existing boardCache before rebuilding
+            const existingBoardCache = config.boardCache;
             clearConfigCache();
             const refreshed = await buildConfigForBoard(
               trelloClient,
               config.defaultBoardId,
               config.defaultBoardName
             );
+            // Restore boardCache (minus the default board, which was just refreshed)
+            if (existingBoardCache) {
+              const { [config.defaultBoardId]: _, ...rest } = existingBoardCache;
+              if (Object.keys(rest).length > 0) {
+                refreshed.boardCache = { ...refreshed.boardCache, ...rest };
+                saveConfig(refreshed);
+              }
+            }
             return {
               content: [
                 {
                   type: "text",
                   text: JSON.stringify({
-                    message: `Config refreshed for "${refreshed.defaultBoardName}". Cached ${Object.keys(refreshed.labels).length} labels and ${Object.keys(refreshed.lists).length} lists.`,
+                    message: `Config refreshed for "${refreshed.defaultBoardName}". Cached ${Object.keys(refreshed.labels).length} labels and ${Object.keys(refreshed.lists).length} lists. ${Object.keys(refreshed.boardCache ?? {}).length} other board(s) preserved in cache.`,
                     config: refreshed,
                   }),
+                },
+              ],
+            };
+          }
+
+          case "trello_get_config": {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: config
+                    ? JSON.stringify(config)
+                    : JSON.stringify({ message: "No config exists yet. Call any tool to trigger setup." }),
                 },
               ],
             };
@@ -880,6 +992,23 @@ async function main() {
             );
             return {
               content: [{ type: "text", text: JSON.stringify(cards) }],
+            };
+          }
+
+          // -- Card creator ----------------------------------
+          case "trello_get_card_creator": {
+            const cardId = args.cardId as string;
+            if (!cardId) throw new Error("Missing required argument: cardId");
+            const creator = await trelloClient.getCardCreator(cardId);
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify(
+                    creator ?? { fullName: "Unknown", username: "unknown" }
+                  ),
+                },
+              ],
             };
           }
 

@@ -20,6 +20,7 @@ export interface TrelloMcpConfig {
   labels: Record<string, string>; // name (lowercase) → id  (default board)
   lists: Record<string, string>; // name (lowercase) → id  (default board)
   boardCache?: Record<string, BoardCache>; // boardId → cached data (non-default boards)
+  lastRefreshed?: string; // ISO 8601 timestamp of last full refresh
 }
 
 // ============================================================
@@ -70,15 +71,53 @@ export interface ConfigSetupResult {
   config?: TrelloMcpConfig;
 }
 
+const STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+/**
+ * Returns true if the config's default board data is older than the threshold.
+ */
+function isConfigStale(config: TrelloMcpConfig): boolean {
+  if (!config.lastRefreshed) return true;
+  const age = Date.now() - new Date(config.lastRefreshed).getTime();
+  return age > STALE_THRESHOLD_MS;
+}
+
 /**
  * Ensures config exists. If not, fetches boards and either auto-selects
  * (single board) or prompts the user to pick one.
+ * If the config is stale (>24h), silently refreshes the default board data.
  */
 export async function ensureConfig(
   client: TrelloClient
 ): Promise<ConfigSetupResult> {
   const existing = loadConfig();
-  if (existing) return { ready: true, config: existing };
+  if (existing) {
+    if (isConfigStale(existing)) {
+      console.error("Config is stale (>24h) — refreshing default board data…");
+      try {
+        const existingBoardCache = existing.boardCache;
+        const refreshed = await buildConfigForBoard(
+          client,
+          existing.defaultBoardId,
+          existing.defaultBoardName
+        );
+        // Preserve boardCache for non-default boards
+        if (existingBoardCache) {
+          const { [existing.defaultBoardId]: _, ...rest } = existingBoardCache;
+          if (Object.keys(rest).length > 0) {
+            refreshed.boardCache = { ...refreshed.boardCache, ...rest };
+            saveConfig(refreshed);
+          }
+        }
+        return { ready: true, config: refreshed };
+      } catch (err) {
+        // If refresh fails (e.g. offline), use stale config rather than blocking
+        console.error("Stale refresh failed, using existing config:", err);
+        return { ready: true, config: existing };
+      }
+    }
+    return { ready: true, config: existing };
+  }
 
   // No config — fetch boards
   const boards = await client.getMyBoards();
@@ -170,6 +209,7 @@ export async function buildConfigForBoard(
     boards: boardMap,
     labels: labelMap,
     lists: listMap,
+    lastRefreshed: new Date().toISOString(),
   };
 
   saveConfig(config);
@@ -181,14 +221,27 @@ export async function buildConfigForBoard(
 // ============================================================
 
 /**
- * Resolves a board ID from args or config.
- * Returns null if neither is available (caller should trigger first-use flow).
+ * Resolves a board ID from `boardId`, `boardName`, or config default.
+ * Returns null if none is available (caller should trigger first-use flow).
  */
 export function resolveBoardId(
   args: Record<string, unknown>,
   config: TrelloMcpConfig | null
 ): string | null {
   if (args.boardId && typeof args.boardId === "string") return args.boardId;
+
+  // Resolve by name from the boards cache
+  if (args.boardName && typeof args.boardName === "string" && config?.boards) {
+    // Try exact match first, then case-insensitive
+    const exact = config.boards[args.boardName];
+    if (exact) return exact;
+    const key = args.boardName.toLowerCase();
+    const match = Object.entries(config.boards).find(
+      ([name]) => name.toLowerCase() === key
+    );
+    if (match) return match[1];
+  }
+
   if (config?.defaultBoardId) return config.defaultBoardId;
   return null;
 }

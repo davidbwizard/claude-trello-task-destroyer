@@ -286,6 +286,32 @@ export class TrelloClient {
   }
 
   // ----------------------------------------------------------------
+  // Card creator
+  // ----------------------------------------------------------------
+
+  async getCardCreator(
+    cardId: string
+  ): Promise<{ fullName: string; username: string } | null> {
+    return this.handleRequest(async () => {
+      const response = await this.axiosInstance.get(
+        `/cards/${cardId}/actions`,
+        {
+          params: {
+            filter: "createCard",
+            limit: 1,
+          },
+        }
+      );
+      const actions: TrelloAction[] = response.data;
+      if (actions.length === 0) return null;
+      return {
+        fullName: actions[0].memberCreator.fullName,
+        username: actions[0].memberCreator.username,
+      };
+    });
+  }
+
+  // ----------------------------------------------------------------
   // Attachments
   // ----------------------------------------------------------------
 
