@@ -78,6 +78,15 @@ export class TrelloClient {
   // Cards
   // ----------------------------------------------------------------
 
+  async getCard(cardId: string): Promise<TrelloCard> {
+    return this.handleRequest(async () => {
+      const response = await this.axiosInstance.get(`/cards/${cardId}`, {
+        params: { fields: "id,name,desc,due,idList,idBoard,idLabels,closed,url,dateLastActivity,labels" },
+      });
+      return response.data;
+    });
+  }
+
   async getCardsByList(listId: string): Promise<TrelloCard[]> {
     return this.handleRequest(async () => {
       const response = await this.axiosInstance.get(`/lists/${listId}/cards`, {

@@ -26,10 +26,6 @@ let pendingWorkCache: PendingWork = {
 
 let pollingInterval: ReturnType<typeof setInterval> | null = null;
 
-// Track PRs we've already processed so we don't re-post comments every cycle.
-// Key: "repo#prNumber", e.g. "jasonbluewizard/Chocabloc#245"
-const processedPRs = new Set<string>();
-
 // ============================================================
 // Public API
 // ============================================================
@@ -68,7 +64,6 @@ export function stopQAPolling(): void {
   if (pollingInterval) {
     clearInterval(pollingInterval);
     pollingInterval = null;
-    processedPRs.clear();
     console.error("QA Automation: polling stopped.");
   }
 }
@@ -482,11 +477,6 @@ async function checkPRs(
     }>;
 
     for (const pr of prs) {
-      const prKey = `${repo.ghSlug}#${pr.number}`;
-
-      // Skip PRs we've already processed in a previous cycle
-      if (processedPRs.has(prKey)) continue;
-
       // When checking "closed" PRs, skip ones that were actually merged —
       // GitHub considers merged PRs as closed too, and we handle those
       // in the separate "merged" pass.
@@ -501,7 +491,17 @@ async function checkPRs(
 
         if (cardId) {
           try {
-            if (state === "merged") {
+            // Check the card's current list — if it's already where we'd
+            // move it, this PR was handled in a previous cycle. Skip it.
+            const card = await client.getCard(cardId);
+            const targetListId = state === "merged"
+              ? config.readyForQAListId
+              : config.inboxListId;
+
+            if (card.idList === targetListId) {
+              comment = `Card already in target list — skipping`;
+              handled = true;
+            } else if (state === "merged") {
               await client.moveCard(cardId, config.readyForQAListId);
               await client.addComment(
                 cardId,
@@ -548,11 +548,6 @@ async function checkPRs(
             handled = false;
           }
         }
-      }
-
-      // Mark as processed so we don't re-handle on subsequent cycles
-      if (handled) {
-        processedPRs.add(prKey);
       }
 
       updates.push({
