@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { TrelloClient } from "./trello-client.js";
+import { QAAutomationConfig } from "./types.js";
 
 // ============================================================
 // Types
@@ -21,6 +22,7 @@ export interface TrelloMcpConfig {
   lists: Record<string, string>; // name (lowercase) → id  (default board)
   boardCache?: Record<string, BoardCache>; // boardId → cached data (non-default boards)
   lastRefreshed?: string; // ISO 8601 timestamp of last full refresh
+  qaAutomation?: QAAutomationConfig; // QA automation config (optional)
 }
 
 // ============================================================

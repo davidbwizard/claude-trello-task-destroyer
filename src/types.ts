@@ -96,3 +96,71 @@ export interface RateLimiter {
   canMakeRequest(): boolean;
   waitForAvailableToken(): Promise<void>;
 }
+
+// ============================================================
+// QA Automation types
+// ============================================================
+
+export interface QARepoConfig {
+  name: string;
+  ghSlug: string;
+  deployBranch: string;
+  pathPrefix: string;
+  subdir?: boolean;
+}
+
+export interface QAAutomationConfig {
+  enabled: boolean;
+  projectRoot: string;
+  watchListId: string;
+  inboxListId: string;
+  inProgressListId: string;
+  readyForQAListId: string;
+  pollIntervalMinutes: number;
+  shipitScript: string;
+  repos: QARepoConfig[];
+  outOfScopePatterns: string[];
+  outOfScopeKeywords: string[];
+  maxFilesPerCard: number;
+}
+
+export type CardClassification =
+  | "simple_text"
+  | "complex"
+  | "out_of_scope"
+  | "unparseable";
+
+export interface AutoResult {
+  status: "success" | "error";
+  commit?: string;
+  message?: string;
+  file?: string;
+}
+
+export interface PendingCard {
+  id: string;
+  shortId: string;
+  title: string;
+  description: string;
+  author: string;
+  url: string;
+  classification: CardClassification;
+  autoResult: AutoResult | null;
+}
+
+export interface PRUpdate {
+  repo: string;
+  prNumber: number;
+  prUrl: string;
+  state: "merged" | "closed";
+  cardUrl: string | null;
+  handled: boolean;
+  comment: string | null;
+}
+
+export interface PendingWork {
+  cards: PendingCard[];
+  prUpdates: PRUpdate[];
+  summary: string;
+  lastPollTime: string | null;
+}

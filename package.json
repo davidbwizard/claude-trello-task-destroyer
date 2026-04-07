@@ -1,6 +1,6 @@
 {
   "name": "trello-mcp-enhanced",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Enhanced Trello MCP server for Claude Code — list boards, filter by labels, move cards, and more.",
   "type": "module",
   "main": "build/index.js",

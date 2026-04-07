@@ -25,6 +25,8 @@ import {
   TrelloMcpConfig,
   ensureBoardCached,
 } from "./config.js";
+import { startQAPolling, getPendingWork } from "./qa-automation.js";
+import { initProject } from "./project-init.js";
 
 // ============================================================
 // Tool definitions
@@ -526,6 +528,115 @@ const trelloDownloadAttachmentTool: Tool = {
   },
 };
 
+// -- QA Automation -------------------------------------------
+
+const trelloGetPendingWorkTool: Tool = {
+  name: "trello_get_pending_work",
+  description:
+    "Returns pending QA work from the background polling cache: cards in the watch list (classified and optionally auto-processed) and PR status updates. Call this from a loop — if the response is empty, stop processing. Requires QA automation to be configured in trello-config.json.",
+  inputSchema: {
+    type: "object",
+    properties: {},
+  },
+};
+
+const trelloInitProjectTool: Tool = {
+  name: "trello_init_project",
+  description:
+    "Generates QA automation config files for a project: trello-loop-config.yaml (commented YAML config) and docs/trello-loop.md (loop setup guide). Also writes the qaAutomation block to the MCP server's trello-config.json. Call this from a project directory after collecting list IDs, repos, and classification preferences from the user.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      projectRoot: {
+        type: "string",
+        description: "Absolute path to the project root directory",
+      },
+      watchListId: {
+        type: "string",
+        description: "Trello list ID to poll for cards",
+      },
+      inboxListId: {
+        type: "string",
+        description: "Trello list ID for rejected/failed cards",
+      },
+      inProgressListId: {
+        type: "string",
+        description: "Trello list ID for cards with open PRs",
+      },
+      readyForQAListId: {
+        type: "string",
+        description: "Trello list ID for completed cards",
+      },
+      repos: {
+        type: "array",
+        description: "Git repos managed by the QA loop",
+        items: {
+          type: "object",
+          properties: {
+            name: {
+              type: "string",
+              description: 'Short name (e.g. "client", "api")',
+            },
+            ghSlug: {
+              type: "string",
+              description: "GitHub owner/repo slug",
+            },
+            deployBranch: {
+              type: "string",
+              description: "Deploy branch name",
+            },
+            pathPrefix: {
+              type: "string",
+              description:
+                'Subdirectory prefix for file detection (empty string for root repo)',
+            },
+          },
+          required: ["name", "ghSlug", "deployBranch", "pathPrefix"],
+        },
+      },
+      shipitScript: {
+        type: "string",
+        description:
+          'Name of the commit/push script in project root (default: "shipit-auto.sh")',
+      },
+      pollIntervalMinutes: {
+        type: "number",
+        description: "How often the loop runs in minutes (default: 10)",
+      },
+      maxFilesPerCard: {
+        type: "number",
+        description:
+          "Cards touching more files than this are out of scope (default: 15)",
+      },
+      outOfScopePatterns: {
+        type: "array",
+        description:
+          'File path patterns that trigger out-of-scope (default: ["routes/", "middleware/", "migrations/"])',
+        items: { type: "string" },
+      },
+      outOfScopeKeywords: {
+        type: "array",
+        description:
+          'Description keywords that trigger out-of-scope (default: ["add component", "new endpoint", "migration", "auth", "database", "schema"])',
+        items: { type: "string" },
+      },
+      overwrite: {
+        type: "boolean",
+        description:
+          "If true, overwrite existing files. If false (default), returns an error if files exist.",
+      },
+    },
+    required: [
+      "projectRoot",
+      "watchListId",
+      "inboxListId",
+      "inProgressListId",
+      "readyForQAListId",
+      "repos",
+    ],
+  },
+};
+
 // ============================================================
 // All tools in registration order
 // ============================================================
@@ -553,6 +664,8 @@ const ALL_TOOLS: Tool[] = [
   trelloGetCardCreatorTool,
   trelloGetCardAttachmentsTool,
   trelloDownloadAttachmentTool,
+  trelloGetPendingWorkTool,
+  trelloInitProjectTool,
 ];
 
 // ============================================================
@@ -564,6 +677,8 @@ const CONFIG_EXEMPT_TOOLS = new Set([
   "trello_set_default_board",
   "trello_get_config",
   "trello_get_my_cards",
+  "trello_get_pending_work",
+  "trello_init_project",
 ]);
 
 // ============================================================
@@ -1098,6 +1213,65 @@ async function main() {
             };
           }
 
+          // -- QA Automation --------------------------------
+          case "trello_get_pending_work": {
+            const work = getPendingWork();
+            return {
+              content: [{ type: "text", text: JSON.stringify(work) }],
+            };
+          }
+
+          case "trello_init_project": {
+            const projectRoot = args.projectRoot as string;
+            if (!projectRoot)
+              throw new Error("Missing required argument: projectRoot");
+
+            // Build a list name resolver from cached config
+            const listNameResolver = (id: string): string | null => {
+              if (!config) return null;
+              // Check default board lists
+              for (const [name, listId] of Object.entries(config.lists)) {
+                if (listId === id) return name.charAt(0).toUpperCase() + name.slice(1);
+              }
+              // Check board cache
+              if (config.boardCache) {
+                for (const board of Object.values(config.boardCache)) {
+                  for (const [name, listId] of Object.entries(board.lists)) {
+                    if (listId === id) return name.charAt(0).toUpperCase() + name.slice(1);
+                  }
+                }
+              }
+              return null;
+            };
+
+            const result = await initProject(
+              {
+                projectRoot,
+                watchListId: args.watchListId as string,
+                inboxListId: args.inboxListId as string,
+                inProgressListId: args.inProgressListId as string,
+                readyForQAListId: args.readyForQAListId as string,
+                repos: args.repos as Array<{
+                  name: string;
+                  ghSlug: string;
+                  deployBranch: string;
+                  pathPrefix: string;
+                }>,
+                shipitScript: args.shipitScript as string | undefined,
+                pollIntervalMinutes: args.pollIntervalMinutes as number | undefined,
+                maxFilesPerCard: args.maxFilesPerCard as number | undefined,
+                outOfScopePatterns: args.outOfScopePatterns as string[] | undefined,
+                outOfScopeKeywords: args.outOfScopeKeywords as string[] | undefined,
+                overwrite: args.overwrite as boolean | undefined,
+              },
+              listNameResolver
+            );
+
+            return {
+              content: [{ type: "text", text: JSON.stringify(result) }],
+            };
+          }
+
           default:
             throw new Error(`Unknown tool: ${request.params.name}`);
         }
@@ -1131,6 +1305,14 @@ async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("Trello MCP Server (Enhanced) running on stdio");
+
+  // Start QA automation polling if configured
+  const qaConfig = loadConfig()?.qaAutomation;
+  if (qaConfig?.enabled) {
+    startQAPolling(trelloClient, qaConfig);
+  } else {
+    console.error("QA Automation: not configured or disabled. Skipping polling.");
+  }
 }
 
 main().catch((error) => {

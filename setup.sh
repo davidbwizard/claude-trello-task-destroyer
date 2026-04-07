@@ -85,5 +85,15 @@ else
   echo "    -- node $SCRIPT_DIR/build/index.js"
 fi
 
+# ----------------------------------------------------------
+# 5. Next steps
+# ----------------------------------------------------------
+echo ""
+echo "─── QA Automation (optional) ───"
+echo ""
+echo "To set up QA automation for a project:"
+echo "  1. Open the project in Claude Code"
+echo "  2. Say: 'Set up the QA loop for this project'"
+echo "  3. Claude will use trello_init_project to generate config files"
 echo ""
 echo "=== Setup Complete ==="
