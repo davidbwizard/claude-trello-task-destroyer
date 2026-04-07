@@ -15,7 +15,18 @@ echo ""
 # 1. Check prerequisites
 # ----------------------------------------------------------
 if ! command -v node &> /dev/null; then
-  echo "Error: Node.js is not installed. Install Node.js 16+ and try again."
+  echo "Error: Node.js is not installed. Install Node.js 18+ and try again."
+  exit 1
+fi
+
+NODE_MAJOR=$(node -p 'process.versions.node.split(".")[0]')
+if [ "$NODE_MAJOR" -lt 18 ]; then
+  echo "Error: Node.js 18+ is required (found $(node -v))."
+  exit 1
+fi
+
+if ! command -v npm &> /dev/null; then
+  echo "Error: npm is not installed. Install npm and try again."
   exit 1
 fi
 
@@ -40,7 +51,8 @@ if [ -z "$TRELLO_API_KEY" ]; then
 fi
 
 if [ -z "$TRELLO_TOKEN" ]; then
-  read -p "Trello Token: " TRELLO_TOKEN
+  read -s -p "Trello Token: " TRELLO_TOKEN
+  echo ""  # newline after silent input
 fi
 
 if [ -z "$TRELLO_API_KEY" ] || [ -z "$TRELLO_TOKEN" ]; then
@@ -49,7 +61,28 @@ if [ -z "$TRELLO_API_KEY" ] || [ -z "$TRELLO_TOKEN" ]; then
 fi
 
 # ----------------------------------------------------------
-# 3. Install and build
+# 3. Validate credentials
+# ----------------------------------------------------------
+echo ""
+echo "Validating Trello credentials..."
+HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+  "https://api.trello.com/1/members/me?key=${TRELLO_API_KEY}&token=${TRELLO_TOKEN}")
+
+if [ "$HTTP_STATUS" != "200" ]; then
+  echo "Error: Trello API returned HTTP $HTTP_STATUS."
+  if [ "$HTTP_STATUS" = "401" ]; then
+    echo "Your API key or token is invalid. Double-check both values and try again."
+  elif [ "$HTTP_STATUS" = "000" ]; then
+    echo "Could not reach the Trello API. Check your internet connection."
+  else
+    echo "Unexpected error. Verify your credentials at https://trello.com/power-ups/admin"
+  fi
+  exit 1
+fi
+echo "Credentials valid."
+
+# ----------------------------------------------------------
+# 4. Install and build
 # ----------------------------------------------------------
 echo ""
 echo "Installing dependencies..."
@@ -61,7 +94,7 @@ echo "Building..."
 npm run build
 
 # ----------------------------------------------------------
-# 4. Register with Claude Code
+# 5. Register with Claude Code
 # ----------------------------------------------------------
 if [ "$SKIP_CLAUDE" != "true" ]; then
   echo ""
@@ -80,13 +113,13 @@ else
   echo "Build complete. To register manually with Claude Code, run:"
   echo ""
   echo "  claude mcp add --scope user trello \\"
-  echo "    -e TRELLO_API_KEY=\"$TRELLO_API_KEY\" \\"
-  echo "    -e TRELLO_TOKEN=\"$TRELLO_TOKEN\" \\"
+  echo "    -e TRELLO_API_KEY=\"\$TRELLO_API_KEY\" \\"
+  echo "    -e TRELLO_TOKEN=\"\$TRELLO_TOKEN\" \\"
   echo "    -- node $SCRIPT_DIR/build/index.js"
 fi
 
 # ----------------------------------------------------------
-# 5. Next steps
+# 6. Next steps
 # ----------------------------------------------------------
 echo ""
 echo "─── QA Automation (optional) ───"
@@ -95,5 +128,11 @@ echo "To set up QA automation for a project:"
 echo "  1. Open the project in Claude Code"
 echo "  2. Say: 'Set up the QA loop for this project'"
 echo "  3. Claude will use trello_init_project to generate config files"
+echo ""
+echo "─── Updating credentials ───"
+echo ""
+echo "If your token expires or you need to switch accounts:"
+echo "  claude mcp remove trello"
+echo "  bash setup.sh"
 echo ""
 echo "=== Setup Complete ==="

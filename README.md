@@ -15,48 +15,12 @@ Browse boards, filter cards by label, move tasks between lists, add comments, an
 - **QA Automation** — background polling monitors a Trello list, auto-classifies changes, handles simple text edits and PR monitoring autonomously, flags complex work for Claude.
 - **Project init** — one tool call generates all config files for a new project, pre-filled from your Trello board.
 
-## Tools
-
-### Core Trello Tools (22)
-
-| Tool | Description |
-|------|-------------|
-| `trello_get_my_boards` | List all your Trello boards |
-| `trello_set_default_board` | Set the default board and cache its labels/lists |
-| `trello_refresh_config` | Re-fetch cached labels and lists for the default board |
-| `trello_get_config` | View the current cached config (boards, labels, lists) |
-| `trello_get_board_labels` | Get all labels on a board (default board if omitted) |
-| `trello_get_cards_by_label` | Filter cards by label name or ID |
-| `trello_get_cards_by_list` | Get all cards in a list by name or ID |
-| `trello_search_cards` | Search cards within a board by keyword |
-| `trello_move_card` | Move a card to a list by name or ID |
-| `trello_add_comment` | Add a comment to a card |
-| `trello_add_card` | Create a new card (list and labels by name) |
-| `trello_update_card` | Update card properties (list and labels by name) |
-| `trello_archive_card` | Archive a card |
-| `trello_get_lists` | List all lists on a board |
-| `trello_add_list` | Create a new list |
-| `trello_archive_list` | Archive a list by name or ID |
-| `trello_get_recent_activity` | Get recent board activity |
-| `trello_get_my_cards` | Get all cards assigned to you |
-| `trello_search_all_boards` | Search across all boards |
-| `trello_get_card_creator` | Get the creator of a card |
-| `trello_get_card_attachments` | List attachments on a card |
-| `trello_download_attachment` | Download an attachment (images inline, files to temp path) |
-
-### QA Automation Tools (2)
-
-| Tool | Description |
-|------|-------------|
-| `trello_get_pending_work` | Returns pending QA work from background polling: classified cards and PR status updates. Designed for `/loop` — returns empty when idle for minimal token usage. |
-| `trello_init_project` | Generates QA config files for a project from templates. Creates `.trello/trello-loop-config.yaml` and `.trello/trello-loop.md` pre-filled with your Trello lists, repos, and classification rules. |
-
 ## Prerequisites
 
-- **Node.js** 16 or higher
+- **Node.js** 18 or higher
 - **Claude Code** CLI installed
 - **Trello account** with API access
-- **GitHub CLI** (`gh`) authenticated — needed for PR monitoring in QA automation
+- **GitHub CLI** (`gh`) authenticated — *only needed for QA automation PR monitoring; not required for core Trello tools*
 
 ## Setup
 
@@ -82,7 +46,8 @@ bash setup.sh
 ```
 
 The setup script will:
-- Ask for your API key and token
+- Ask for your API key and token (token input is hidden)
+- Validate credentials against the Trello API before proceeding
 - Install dependencies and build the project
 - Register the MCP server with Claude Code
 
@@ -127,6 +92,20 @@ After init, start the loop:
 ```
 /loop 10m @.trello/trello-loop.md Call trello_get_pending_work. If empty, stop. Otherwise process pending items. Use acceptEdits mode.
 ```
+
+## Usage
+
+Once set up, just talk to Claude naturally:
+
+- "List my Trello boards"
+- "Show me the Inbox"
+- "What bugs do we have?"
+- "Show me the lists on Shell Shockers Working Board"
+- "Move that card to In Progress"
+- "Add a comment saying I'm working on this"
+- "Create a new card for adding dark mode in the Inbox with the Feature Request label"
+- "Search for cards about onboarding"
+- "Set up the QA loop for this project"
 
 ## Configuration
 
@@ -189,19 +168,60 @@ Welcome to ChocaBLOC!
 
 Cards with this structure are auto-classified as simple text and handled without AI.
 
-## Usage
+## Tools
 
-Once set up, just talk to Claude naturally:
+### Core Trello Tools (22)
 
-- "List my Trello boards"
-- "Show me the Inbox"
-- "What bugs do we have?"
-- "Show me the lists on Shell Shockers Working Board"
-- "Move that card to In Progress"
-- "Add a comment saying I'm working on this"
-- "Create a new card for adding dark mode in the Inbox with the Feature Request label"
-- "Search for cards about onboarding"
-- "Set up the QA loop for this project"
+| Tool | Description |
+|------|-------------|
+| `trello_get_my_boards` | List all your Trello boards |
+| `trello_set_default_board` | Set the default board and cache its labels/lists |
+| `trello_refresh_config` | Re-fetch cached labels and lists for the default board |
+| `trello_get_config` | View the current cached config (boards, labels, lists) |
+| `trello_get_board_labels` | Get all labels on a board (default board if omitted) |
+| `trello_get_cards_by_label` | Filter cards by label name or ID |
+| `trello_get_cards_by_list` | Get all cards in a list by name or ID |
+| `trello_search_cards` | Search cards within a board by keyword |
+| `trello_move_card` | Move a card to a list by name or ID |
+| `trello_add_comment` | Add a comment to a card |
+| `trello_add_card` | Create a new card (list and labels by name) |
+| `trello_update_card` | Update card properties (list and labels by name) |
+| `trello_archive_card` | Archive a card |
+| `trello_get_lists` | List all lists on a board |
+| `trello_add_list` | Create a new list |
+| `trello_archive_list` | Archive a list by name or ID |
+| `trello_get_recent_activity` | Get recent board activity |
+| `trello_get_my_cards` | Get all cards assigned to you |
+| `trello_search_all_boards` | Search across all boards |
+| `trello_get_card_creator` | Get the creator of a card |
+| `trello_get_card_attachments` | List attachments on a card |
+| `trello_download_attachment` | Download an attachment (images inline, files to temp path) |
+
+### QA Automation Tools (2)
+
+| Tool | Description |
+|------|-------------|
+| `trello_get_pending_work` | Returns pending QA work from background polling: classified cards and PR status updates. Designed for `/loop` — returns empty when idle for minimal token usage. |
+| `trello_init_project` | Generates QA config files for a project from templates. Creates `.trello/trello-loop-config.yaml` and `.trello/trello-loop.md` pre-filled with your Trello lists, repos, and classification rules. |
+
+## Updating Credentials
+
+If your token expires or you need to switch accounts:
+
+```bash
+claude mcp remove trello
+bash setup.sh
+```
+
+## Troubleshooting
+
+| Problem | Fix |
+|---------|-----|
+| Tools fail with "Trello API error: unauthorized" | Token expired or revoked. Run `claude mcp remove trello` then `bash setup.sh` with fresh credentials. |
+| Board/list/label names not resolving | Cache may be stale. Call `trello_refresh_config` to re-fetch. |
+| Config seems corrupted or stuck | Delete `trello-config.json` from the MCP repo directory and call any tool — config will re-initialize from scratch. |
+| Default board was deleted on Trello | Delete `trello-config.json` and call any tool to re-trigger board selection. |
+| `gh` errors during QA automation | Ensure GitHub CLI is installed and authenticated (`gh auth status`). Only needed for QA PR monitoring. |
 
 ## CLAUDE.md
 
