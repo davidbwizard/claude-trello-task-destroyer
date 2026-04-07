@@ -26,6 +26,10 @@ let pendingWorkCache: PendingWork = {
 
 let pollingInterval: ReturnType<typeof setInterval> | null = null;
 
+// Track PRs we've already processed so we don't re-post comments every cycle.
+// Key: "repo#prNumber", e.g. "jasonbluewizard/Chocabloc#245"
+const processedPRs = new Set<string>();
+
 // ============================================================
 // Public API
 // ============================================================
@@ -64,6 +68,7 @@ export function stopQAPolling(): void {
   if (pollingInterval) {
     clearInterval(pollingInterval);
     pollingInterval = null;
+    processedPRs.clear();
     console.error("QA Automation: polling stopped.");
   }
 }
@@ -465,7 +470,7 @@ async function checkPRs(
 
   try {
     const output = execSync(
-      `gh pr list -R ${shellEscape(repo.ghSlug)} --search "head:qa/" --state ${state} --json number,url,body --limit 20`,
+      `gh pr list -R ${shellEscape(repo.ghSlug)} --search "head:qa/" --state ${state} --json number,url,body,mergedAt --limit 20`,
       { encoding: "utf-8", timeout: 15000 }
     );
 
@@ -473,9 +478,20 @@ async function checkPRs(
       number: number;
       url: string;
       body: string;
+      mergedAt: string | null;
     }>;
 
     for (const pr of prs) {
+      const prKey = `${repo.ghSlug}#${pr.number}`;
+
+      // Skip PRs we've already processed in a previous cycle
+      if (processedPRs.has(prKey)) continue;
+
+      // When checking "closed" PRs, skip ones that were actually merged —
+      // GitHub considers merged PRs as closed too, and we handle those
+      // in the separate "merged" pass.
+      if (state === "closed" && pr.mergedAt) continue;
+
       const cardUrl = extractTrelloCardUrl(pr.body);
       let handled = false;
       let comment: string | null = null;
@@ -532,6 +548,11 @@ async function checkPRs(
             handled = false;
           }
         }
+      }
+
+      // Mark as processed so we don't re-handle on subsequent cycles
+      if (handled) {
+        processedPRs.add(prKey);
       }
 
       updates.push({
