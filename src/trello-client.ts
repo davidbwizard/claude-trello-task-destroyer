@@ -7,6 +7,10 @@ import {
   TrelloAction,
   TrelloLabel,
   TrelloAttachment,
+  TrelloComment,
+  TrelloChecklist,
+  TrelloCheckItem,
+  TrelloMember,
 } from "./types.js";
 import { createTrelloRateLimiters } from "./rate-limiter.js";
 
@@ -81,7 +85,7 @@ export class TrelloClient {
   async getCard(cardId: string): Promise<TrelloCard> {
     return this.handleRequest(async () => {
       const response = await this.axiosInstance.get(`/cards/${cardId}`, {
-        params: { fields: "id,name,desc,due,idList,idBoard,idLabels,closed,url,dateLastActivity,labels" },
+        params: { fields: "id,name,desc,due,idList,idBoard,idLabels,closed,url,dateLastActivity,labels,idMembers" },
       });
       return response.data;
     });
@@ -192,6 +196,39 @@ export class TrelloClient {
         { text }
       );
       return response.data;
+    });
+  }
+
+  /**
+   * Comments on a card, newest first — the order the Trello API returns them.
+   *
+   * `before` takes the `date` of the oldest comment you already have and pages
+   * further back, because a long-lived card can hold far more comment history
+   * than is useful to read in one go.
+   */
+  async getComments(
+    cardId: string,
+    limit = 50,
+    before?: string
+  ): Promise<TrelloComment[]> {
+    return this.handleRequest(async () => {
+      const response = await this.axiosInstance.get(
+        `/cards/${cardId}/actions`,
+        {
+          params: {
+            filter: "commentCard",
+            // Trello caps this at 1000 and rejects 0 or negatives outright.
+            limit: Math.min(Math.max(limit, 1), 1000),
+            ...(before ? { before } : {}),
+          },
+        }
+      );
+      return (response.data as TrelloAction[]).map((action) => ({
+        id: action.id,
+        date: action.date,
+        text: action.data?.text ?? "",
+        memberCreator: action.memberCreator,
+      }));
     });
   }
 
@@ -389,6 +426,133 @@ export class TrelloClient {
           error: `Download failed: ${errorMessage}`,
         };
       }
+    });
+  }
+
+  // ----------------------------------------------------------------
+  // Checklists
+  // ----------------------------------------------------------------
+
+  async getChecklists(cardId: string): Promise<TrelloChecklist[]> {
+    return this.handleRequest(async () => {
+      const response = await this.axiosInstance.get(
+        `/cards/${cardId}/checklists`
+      );
+      return response.data;
+    });
+  }
+
+  /**
+   * Creates a checklist and, optionally, its items in one call.
+   *
+   * Trello has no endpoint that does both, so the items are POSTed one at a
+   * time afterwards. They go sequentially rather than in parallel: position is
+   * assigned server-side on insert, and concurrent posts would land in a
+   * non-deterministic order.
+   *
+   * The checklist is re-read at the end so the return value carries the items
+   * as stored, rather than a locally assembled guess at what the server did.
+   */
+  async addChecklist(
+    cardId: string,
+    name: string,
+    items: string[] = []
+  ): Promise<TrelloChecklist> {
+    return this.handleRequest(async () => {
+      const response = await this.axiosInstance.post(
+        `/cards/${cardId}/checklists`,
+        { name }
+      );
+      const checklist: TrelloChecklist = response.data;
+
+      if (items.length === 0) return checklist;
+
+      for (const itemName of items) {
+        await this.axiosInstance.post(
+          `/checklists/${checklist.id}/checkItems`,
+          { name: itemName }
+        );
+      }
+
+      const reread = await this.axiosInstance.get(
+        `/checklists/${checklist.id}`
+      );
+      return reread.data;
+    });
+  }
+
+  /**
+   * Updates one check item's state and/or name.
+   *
+   * Note the endpoint hangs off the CARD, not the checklist — Trello's
+   * `/checklists/{id}/checkItems/{id}` PUT does not accept `state`, which is
+   * the field this exists to change.
+   */
+  async updateCheckItem(params: {
+    cardId: string;
+    checkItemId: string;
+    state?: "complete" | "incomplete";
+    name?: string;
+  }): Promise<TrelloCheckItem> {
+    return this.handleRequest(async () => {
+      const body: Record<string, unknown> = {};
+      if (params.state !== undefined) body.state = params.state;
+      if (params.name !== undefined) body.name = params.name;
+
+      const response = await this.axiosInstance.put(
+        `/cards/${params.cardId}/checkItem/${params.checkItemId}`,
+        body
+      );
+      return response.data;
+    });
+  }
+
+  // ----------------------------------------------------------------
+  // Members
+  // ----------------------------------------------------------------
+
+  async getBoardMembers(boardId: string): Promise<TrelloMember[]> {
+    return this.handleRequest(async () => {
+      const response = await this.axiosInstance.get(
+        `/boards/${boardId}/members`,
+        { params: { fields: "id,fullName,username,avatarUrl" } }
+      );
+      return response.data;
+    });
+  }
+
+  /**
+   * Adds or removes a member on a card. Returns the card's member list as it
+   * stands afterwards.
+   *
+   * Assigning someone already assigned is a no-op on Trello's side rather than
+   * an error, so this is safe to call without reading the card first.
+   */
+  async assignMember(
+    cardId: string,
+    memberId: string,
+    remove = false
+  ): Promise<{ cardId: string; memberId: string; removed: boolean; idMembers: string[] }> {
+    return this.handleRequest(async () => {
+      if (remove) {
+        await this.axiosInstance.delete(
+          `/cards/${cardId}/idMembers/${memberId}`
+        );
+      } else {
+        await this.axiosInstance.post(`/cards/${cardId}/idMembers`, {
+          value: memberId,
+        });
+      }
+
+      const card = await this.axiosInstance.get(`/cards/${cardId}`, {
+        params: { fields: "idMembers" },
+      });
+      return {
+        cardId,
+        memberId,
+        removed: remove,
+        idMembers: card.data.idMembers ?? [],
+      };
     });
   }
 }

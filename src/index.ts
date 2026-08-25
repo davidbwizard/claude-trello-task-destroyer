@@ -107,6 +107,22 @@ const trelloGetBoardLabelsTool: Tool = {
 
 // -- Cards ---------------------------------------------------
 
+const trelloGetCardTool: Tool = {
+  name: "trello_get_card",
+  description:
+    "Retrieves a single card by its ID: name, description, due date, labels, assigned members, list, and URL. Use this when you already know which card you want — it avoids pulling a whole list and filtering it.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      cardId: {
+        type: "string",
+        description: "The ID of the Trello card",
+      },
+    },
+    required: ["cardId"],
+  },
+};
+
 const trelloGetCardsByListTool: Tool = {
   name: "trello_get_cards_by_list",
   description:
@@ -331,6 +347,32 @@ const trelloAddCommentTool: Tool = {
   },
 };
 
+const trelloGetCommentsTool: Tool = {
+  name: "trello_get_comments",
+  description:
+    "Reads the comments on a card, newest first. Use this before starting work on a card — an earlier session may have already investigated it, and the discussion often contradicts or qualifies the description. Returns comment text, author, and date.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      cardId: {
+        type: "string",
+        description: "The ID of the card to read comments from",
+      },
+      limit: {
+        type: "number",
+        description:
+          "Maximum comments to return (default 50, max 1000). Newest first.",
+      },
+      before: {
+        type: "string",
+        description:
+          "Return only comments older than this ISO date. Pass the date of the oldest comment you already have to page further back through a long history.",
+      },
+    },
+    required: ["cardId"],
+  },
+};
+
 // -- Lists ---------------------------------------------------
 
 const trelloGetListsTool: Tool = {
@@ -528,6 +570,127 @@ const trelloDownloadAttachmentTool: Tool = {
   },
 };
 
+// -- Checklists ----------------------------------------------
+
+const trelloGetChecklistsTool: Tool = {
+  name: "trello_get_checklists",
+  description:
+    "Lists the checklists on a card, each with its check items and their complete/incomplete state.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      cardId: {
+        type: "string",
+        description: "The ID of the Trello card",
+      },
+    },
+    required: ["cardId"],
+  },
+};
+
+const trelloAddChecklistTool: Tool = {
+  name: "trello_add_checklist",
+  description:
+    "Adds a checklist to a card, optionally with its items in the same call. Items are created in the order given.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      cardId: {
+        type: "string",
+        description: "The ID of the card to add the checklist to",
+      },
+      name: {
+        type: "string",
+        description: "The checklist name, e.g. 'Acceptance criteria'",
+      },
+      items: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Optional check items to create, in order. Omit to create an empty checklist.",
+      },
+    },
+    required: ["cardId", "name"],
+  },
+};
+
+const trelloUpdateCheckItemTool: Tool = {
+  name: "trello_update_checkitem",
+  description:
+    "Ticks, unticks, or renames a single check item. Get the item's ID from trello_get_checklists first.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      cardId: {
+        type: "string",
+        description:
+          "The ID of the card the item belongs to (required by the Trello endpoint, not the checklist ID)",
+      },
+      checkItemId: {
+        type: "string",
+        description: "The ID of the check item to update",
+      },
+      state: {
+        type: "string",
+        enum: ["complete", "incomplete"],
+        description: "Tick or untick the item",
+      },
+      name: {
+        type: "string",
+        description: "New text for the item",
+      },
+    },
+    required: ["cardId", "checkItemId"],
+  },
+};
+
+// -- Members -------------------------------------------------
+
+const trelloGetBoardMembersTool: Tool = {
+  name: "trello_get_board_members",
+  description:
+    "Lists the members of a board with their IDs, full names and usernames. Use this to resolve a person's name to the member ID that trello_assign_member needs. Uses the default board if boardId/boardName is omitted.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      boardId: {
+        type: "string",
+        description: "Board ID (optional — uses default)",
+      },
+      boardName: {
+        type: "string",
+        description: "Board name (alternative to boardId)",
+      },
+    },
+  },
+};
+
+const trelloAssignMemberTool: Tool = {
+  name: "trello_assign_member",
+  description:
+    "Assigns a member to a card, or removes them with remove=true. Returns the card's member list as it stands afterwards. Assigning someone already assigned is a no-op, not an error.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      cardId: {
+        type: "string",
+        description: "The ID of the card",
+      },
+      memberId: {
+        type: "string",
+        description:
+          "The member's ID, from trello_get_board_members. Not the username.",
+      },
+      remove: {
+        type: "boolean",
+        description:
+          "Set true to unassign the member instead of assigning them. Defaults to false.",
+      },
+    },
+    required: ["cardId", "memberId"],
+  },
+};
+
 // -- QA Automation -------------------------------------------
 
 const trelloGetPendingWorkTool: Tool = {
@@ -647,6 +810,7 @@ const ALL_TOOLS: Tool[] = [
   trelloRefreshConfigTool,
   trelloGetConfigTool,
   trelloGetBoardLabelsTool,
+  trelloGetCardTool,
   trelloGetCardsByListTool,
   trelloGetCardsByLabelTool,
   trelloAddCardTool,
@@ -654,6 +818,7 @@ const ALL_TOOLS: Tool[] = [
   trelloMoveCardTool,
   trelloArchiveCardTool,
   trelloAddCommentTool,
+  trelloGetCommentsTool,
   trelloGetListsTool,
   trelloAddListTool,
   trelloArchiveListTool,
@@ -664,6 +829,11 @@ const ALL_TOOLS: Tool[] = [
   trelloGetCardCreatorTool,
   trelloGetCardAttachmentsTool,
   trelloDownloadAttachmentTool,
+  trelloGetChecklistsTool,
+  trelloAddChecklistTool,
+  trelloUpdateCheckItemTool,
+  trelloGetBoardMembersTool,
+  trelloAssignMemberTool,
   trelloGetPendingWorkTool,
   trelloInitProjectTool,
 ];
@@ -856,6 +1026,15 @@ async function main() {
           }
 
           // -- Cards -----------------------------------------
+          case "trello_get_card": {
+            const cardId = args.cardId as string;
+            if (!cardId) throw new Error("Missing required argument: cardId");
+            const card = await trelloClient.getCard(cardId);
+            return {
+              content: [{ type: "text", text: JSON.stringify(card) }],
+            };
+          }
+
           case "trello_get_cards_by_list": {
             const boardId = resolveBoardId(args, config);
             if (!boardId)
@@ -1000,6 +1179,19 @@ async function main() {
             const comment = await trelloClient.addComment(cardId, text);
             return {
               content: [{ type: "text", text: JSON.stringify(comment) }],
+            };
+          }
+
+          case "trello_get_comments": {
+            const cardId = args.cardId as string;
+            if (!cardId) throw new Error("Missing required argument: cardId");
+            const comments = await trelloClient.getComments(
+              cardId,
+              (args.limit as number) ?? 50,
+              args.before as string | undefined
+            );
+            return {
+              content: [{ type: "text", text: JSON.stringify(comments) }],
             };
           }
 
@@ -1210,6 +1402,89 @@ async function main() {
                   }),
                 },
               ],
+            };
+          }
+
+          // -- Checklists -----------------------------------
+          case "trello_get_checklists": {
+            const cardId = args.cardId as string;
+            if (!cardId) throw new Error("Missing required argument: cardId");
+            const checklists = await trelloClient.getChecklists(cardId);
+            return {
+              content: [{ type: "text", text: JSON.stringify(checklists) }],
+            };
+          }
+
+          case "trello_add_checklist": {
+            const cardId = args.cardId as string;
+            const name = args.name as string;
+            if (!cardId || !name)
+              throw new Error("Missing required arguments: cardId, name");
+            const items = (args.items as string[] | undefined) ?? [];
+            if (!Array.isArray(items))
+              throw new Error("items must be an array of strings");
+            const checklist = await trelloClient.addChecklist(
+              cardId,
+              name,
+              items
+            );
+            return {
+              content: [{ type: "text", text: JSON.stringify(checklist) }],
+            };
+          }
+
+          case "trello_update_checkitem": {
+            const cardId = args.cardId as string;
+            const checkItemId = args.checkItemId as string;
+            if (!cardId || !checkItemId)
+              throw new Error(
+                "Missing required arguments: cardId, checkItemId"
+              );
+            const state = args.state as
+              | "complete"
+              | "incomplete"
+              | undefined;
+            const name = args.name as string | undefined;
+            if (state === undefined && name === undefined)
+              throw new Error("Nothing to update: pass state and/or name");
+            if (state !== undefined && state !== "complete" && state !== "incomplete")
+              throw new Error("state must be 'complete' or 'incomplete'");
+            const item = await trelloClient.updateCheckItem({
+              cardId,
+              checkItemId,
+              state,
+              name,
+            });
+            return {
+              content: [{ type: "text", text: JSON.stringify(item) }],
+            };
+          }
+
+          // -- Members --------------------------------------
+          case "trello_get_board_members": {
+            const boardId =
+              resolveBoardId(args, config) ??
+              (() => {
+                throw new Error("No board ID available. Set a default board first.");
+              })();
+            const members = await trelloClient.getBoardMembers(boardId);
+            return {
+              content: [{ type: "text", text: JSON.stringify(members) }],
+            };
+          }
+
+          case "trello_assign_member": {
+            const cardId = args.cardId as string;
+            const memberId = args.memberId as string;
+            if (!cardId || !memberId)
+              throw new Error("Missing required arguments: cardId, memberId");
+            const result = await trelloClient.assignMember(
+              cardId,
+              memberId,
+              (args.remove as boolean) ?? false
+            );
+            return {
+              content: [{ type: "text", text: JSON.stringify(result) }],
             };
           }
 

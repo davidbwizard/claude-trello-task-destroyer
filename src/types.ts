@@ -29,6 +29,9 @@ export interface TrelloCard {
   closed: boolean;
   url: string;
   dateLastActivity: string;
+  // Only populated by getCard — the list endpoints do not request this field,
+  // so it is optional rather than a lie about what the others return.
+  idMembers?: string[];
 }
 
 export interface TrelloList {
@@ -90,6 +93,36 @@ export interface TrelloAttachment {
   idMember: string;
   isUpload: boolean;
   fileName: string;
+}
+
+// A comment is a commentCard action. Narrowed from TrelloAction so the text is
+// non-optional here: the API only omits data.text for other action types.
+export interface TrelloComment {
+  id: string;
+  date: string;
+  text: string;
+  memberCreator: {
+    id: string;
+    fullName: string;
+    username: string;
+  };
+}
+
+export interface TrelloCheckItem {
+  id: string;
+  idChecklist: string;
+  name: string;
+  state: "complete" | "incomplete";
+  pos: number;
+}
+
+export interface TrelloChecklist {
+  id: string;
+  idCard: string;
+  idBoard: string;
+  name: string;
+  pos: number;
+  checkItems: TrelloCheckItem[];
 }
 
 export interface RateLimiter {
